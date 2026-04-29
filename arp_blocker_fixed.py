@@ -3,6 +3,7 @@ import time
 import sys
 import socket
 import subprocess
+import threading
 
 INTERVALO = 1.5
 
@@ -23,7 +24,7 @@ def detectar_red():
         for linea in resultado.splitlines():
             if mi_ip in linea:
                 en_adaptador = True
-            if en_adaptador and "Puerta de enlace" in linea or (en_adaptador and "Default Gateway" in linea):
+            if en_adaptador and ("Puerta de enlace" in linea or "Default Gateway" in linea):
                 partes = linea.split(":")
                 if len(partes) > 1:
                     gw = partes[-1].strip()
@@ -53,16 +54,12 @@ def detectar_red():
 
     if not interfaz_guid:
         print("[!] No se encontro la interfaz con IP", mi_ip)
-        print("    Interfaces disponibles:")
-        for k, v in IFACES.items():
-            print(f"      {k} -> {getattr(v, 'name', '?')} | {getattr(v, 'ip', '?')}")
         sys.exit(1)
 
     return interfaz_guid, mi_ip, gateway, rango, nombre
 
 
 def leer_arp_windows(mi_ip, gateway):
-    """Lee la tabla ARP de Windows como fallback."""
     try:
         resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
         dispositivos = []
@@ -84,7 +81,9 @@ def leer_arp_windows(mi_ip, gateway):
                 ip = partes[0]
                 mac = partes[1].replace("-", ":")
                 
-                if (ip not in (gateway, mi_ip, "224.0.0.22", "224.0.0.251", "224.0.0.252", "239.255.255.250") 
+                if (ip not in (gateway, mi_ip) 
+                    and not ip.startswith("224.") 
+                    and not ip.startswith("239.")
                     and not ip.endswith(".255") 
                     and "dinámico" in linea.lower()
                     and mac != "ff:ff:ff:ff:ff:ff"):
@@ -93,38 +92,90 @@ def leer_arp_windows(mi_ip, gateway):
         
         return dispositivos
     except Exception as e:
-        print(f"[!] Error leyendo arp -a: {e}")
         return []
 
 
+def forzar_descubrimiento(mi_ip):
+    partes = mi_ip.split(".")
+    base = f"{partes[0]}.{partes[1]}.{partes[2]}"
+    print("[*] Forzando descubrimiento de red (Ping Sweep silencioso)...")
+    
+    def hacer_ping(ip):
+        try:
+            # 0x08000000 = CREATE_NO_WINDOW evita que salten consolas negras en Windows
+            subprocess.call(["ping", "-n", "1", "-w", "300", ip], 
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL,
+                            creationflags=0x08000000)
+        except Exception:
+            pass
+
+    hilos = []
+    for i in range(1, 255):
+        ip = f"{base}.{i}"
+        t = threading.Thread(target=hacer_ping, args=(ip,))
+        t.daemon = True
+        t.start()
+        hilos.append(t)
+    
+    # Esperamos unos segundos para que los pings devuelvan respuesta y pueblen la tabla ARP
+    time.sleep(3.5)
+
+
 def escanear_red(rango, interfaz, mi_ip, gateway):
-    """ARP sweep para descubrir dispositivos activos."""
-    print(f"[*] Escaneando {rango}...")
+    print(f"\n[*] Iniciando escaneo en {rango}...")
+    
+    # 1. Ejecutar Ping Sweep para despertar la red (vital para Windows)
+    forzar_descubrimiento(mi_ip)
+
+    # 2. Intento de escaneo con Scapy
     paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=rango)
-    respondidos, _ = srp(paquete, iface=interfaz, timeout=8, verbose=False)
+    respondidos, _ = srp(paquete, iface=interfaz, timeout=4, verbose=False)
 
     dispositivos = []
+    ips_encontradas = set()
+    
     for _, resp in respondidos:
         ip  = resp[ARP].psrc
         mac = resp[ARP].hwsrc
         if ip in (gateway, mi_ip):
             continue
         dispositivos.append({"ip": ip, "mac": mac})
-        print(f"    [+] {ip}  |  {mac}")
+        ips_encontradas.add(ip)
+        print(f"    [+] {ip}  |  {mac} (Scapy)")
 
-    if not dispositivos:
-        print("[*] Escaneo activo no encontro dispositivos.")
-        print("[*] Leyendo tabla ARP de Windows...")
-        dispositivos = leer_arp_windows(mi_ip, gateway)
+    # 3. Lectura de la tabla ARP de Windows (El más confiable tras el Ping Sweep)
+    print("[*] Combinando con la tabla ARP de Windows...")
+    dispositivos_windows = leer_arp_windows(mi_ip, gateway)
+    
+    for dw in dispositivos_windows:
+        if dw["ip"] not in ips_encontradas:
+            dispositivos.append(dw)
+            ips_encontradas.add(dw["ip"])
 
     return dispositivos
 
 
 def obtener_mac(ip, interfaz):
-    paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
-    resp, _ = srp(paquete, iface=interfaz, timeout=2, verbose=False)
-    if resp:
-        return resp[0][1].hwsrc
+    # 3 intentos de escaneo activo
+    for _ in range(3):
+        paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
+        resp, _ = srp(paquete, iface=interfaz, timeout=5, verbose=False)
+        if resp:
+            return resp[0][1].hwsrc
+        time.sleep(0.5)
+    
+    # Fallback: leer de arp -a
+    try:
+        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
+        for linea in resultado.splitlines():
+            if ip in linea and "dinámico" in linea.lower():
+                partes = linea.split()
+                if len(partes) >= 2 and partes[0] == ip:
+                    return partes[1].replace("-", ":")
+    except Exception:
+        pass
+    
     return None
 
 
@@ -168,9 +219,11 @@ def main():
 
     mi_mac = get_if_hwaddr(interfaz)
 
+    print(f"[*] Obteniendo MAC del gateway...")
     mac_gateway = obtener_mac(gateway, interfaz)
     if not mac_gateway:
         print(f"[!] No se pudo obtener la MAC del gateway ({gateway})")
+        print(f"[!] Verifica que estas conectado a la red.")
         sys.exit(1)
     print(f"[+] MAC Gateway : {mac_gateway}\n")
 
