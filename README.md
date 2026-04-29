@@ -46,6 +46,7 @@ Listens passively on port 80 for HTTP POST requests containing login fields such
 ## ✨ Features
 
 - ✅ **Fully automatic** — no manual configuration needed
+- ✅ **New: Automated Discovery** — Performs a silent multi-threaded ping sweep to populate ARP tables, ensuring 100% device detection on Windows.
 - ✅ Detects active network interface, IP, gateway, and subnet automatically
 - ✅ Scans and blocks **all devices** on the network simultaneously
 - ✅ Re-scans every 30 cycles to catch **newly connected devices**
@@ -85,7 +86,7 @@ Always open **CMD as Administrator** (required for raw packet access).
 
 ### ARP Blocker
 ```bash
-python arp_blocker_auto.py
+python arp_blocker_fixed.py
 ```
 
 Expected output:
@@ -148,7 +149,7 @@ Test sites (HTTP only, made for security practice):
 
 ```
 NetReaper/
-├── arp_blocker_auto.py   # Automatic ARP blocker — no config needed
+├── arp_blocker_fixed.py   # Automatic ARP blocker — no config needed
 ├── http_sniffer.py       # HTTP credentials sniffer
 └── README.md
 ```
@@ -220,6 +221,7 @@ Escucha pasivamente en el puerto 80 peticiones HTTP POST que contengan campos de
 ## ✨ Características
 
 - ✅ **Totalmente automático** — sin configuración manual
+- ✅ **Nuevo: Descubrimiento Automatizado** — Realiza un barrido de pings (ping sweep) silencioso y multihilo para despertar a la red antes del bloqueo.
 - ✅ Detecta interfaz, IP, gateway y subred automáticamente
 - ✅ Escanea y bloquea **todos los dispositivos** de la red simultáneamente
 - ✅ Re-escanea cada 30 ciclos para detectar **nuevos dispositivos conectados**
@@ -259,7 +261,7 @@ Siempre abrir **CMD como Administrador** (requerido para acceso a paquetes raw).
 
 ### ARP Blocker
 ```bash
-python arp_blocker_auto.py
+python arp_blocker_fixed.py
 ```
 
 Presiona **Ctrl+C** para detener y restaurar todos los dispositivos automáticamente.
@@ -292,7 +294,7 @@ Sitios de prueba (HTTP puro, hechos para práctica de seguridad):
 
 ```
 NetReaper/
-├── arp_blocker_auto.py   # Bloqueador ARP automático — sin configuración
+├── arp_blocker_fixed.py   # Bloqueador ARP automático — sin configuración
 ├── http_sniffer.py       # Sniffer de credenciales HTTP
 └── README.md
 ```
