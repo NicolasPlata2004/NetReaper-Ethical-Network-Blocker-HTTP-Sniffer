@@ -314,3 +314,12 @@ Construido como proyecto práctico para una materia de **Redes de Computadores**
 ## 📄 Licencia
 
 Solo para uso educativo. No usar en redes que no sean de tu propiedad o para las cuales no tengas permiso explícito de prueba.
+
+---
+
+## 👥 Equipo / Autores
+
+* **Nicolás Plata** - *Desarrollador Principal*
+* **Sebastián Clavijo Tocasuchyl** - [sclavijot@unal.edu.co](mailto:sclavijot@unal.edu.co)
+* **Sebastián Ramiro Pedroza Garnica** - [spedrozag@unal.edu.co](mailto:spedrozag@unal.edu.co)
+* **Alexandra Garavito Cordero** - [mgaravito@unal.edu.co](mailto:mgaravito@unal.edu.co)
