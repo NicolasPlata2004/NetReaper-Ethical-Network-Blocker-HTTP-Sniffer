@@ -46,7 +46,7 @@ Listens passively on port 80 for HTTP POST requests containing login fields such
 ## ✨ Features
 
 - ✅ **Fully automatic** — no manual configuration needed
-- ✅ **New: Automated Discovery** — Performs a silent multi-threaded ping sweep to populate ARP tables, ensuring 100% device detection on Windows.
+- ✅ **Network Wake-up** — Both tools now perform a silent multi-threaded ping sweep to populate ARP tables, ensuring 100% reliability on Windows.
 - ✅ Detects active network interface, IP, gateway, and subnet automatically
 - ✅ Scans and blocks **all devices** on the network simultaneously
 - ✅ Re-scans every 30 cycles to catch **newly connected devices**
@@ -221,7 +221,7 @@ Escucha pasivamente en el puerto 80 peticiones HTTP POST que contengan campos de
 ## ✨ Características
 
 - ✅ **Totalmente automático** — sin configuración manual
-- ✅ **Nuevo: Descubrimiento Automatizado** — Realiza un barrido de pings (ping sweep) silencioso y multihilo para despertar a la red antes del bloqueo.
+- ✅ **Despertar de Red** — Ambas herramientas realizan ahora un barrido de pings silencioso y multihilo para despertar a la red y asegurar la detección en Windows.
 - ✅ Detecta interfaz, IP, gateway y subred automáticamente
 - ✅ Escanea y bloquea **todos los dispositivos** de la red simultáneamente
 - ✅ Re-escanea cada 30 ciclos para detectar **nuevos dispositivos conectados**
