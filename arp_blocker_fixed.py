@@ -96,6 +96,7 @@ def leer_arp_windows(mi_ip, gateway):
 
 
 def forzar_descubrimiento(mi_ip):
+    # #VIPREDARP 1 - Ping Sweep (Reconocimiento)
     # FASE DE RECONOCIMIENTO: Ping Sweep
     # Para que el ataque funcione, Windows necesita conocer qué dispositivos están vivos.
     # Enviamos un "ping" a todas las posibles IPs de la subred para forzarlos a responder
@@ -184,6 +185,7 @@ def obtener_mac(ip, interfaz):
 
 
 def spoof(ip_objetivo, mac_objetivo, ip_suplantada, mi_mac, interfaz):
+    # #VIPREDARP 2 - Paquete Forjado (Fallo de Integridad A08)
     # VULNERABILIDAD CAPA 2: ARP Spoofing como mecanismo de DoS (Denial of Service)
     # Al inyectar estos paquetes falsos, envenenamos la caché de la víctima.
     # Dado que NO tenemos activado el reenvío de paquetes (IP Forwarding), 
@@ -257,6 +259,7 @@ def main():
                         dispositivos.append(d)
                         print(f"    [+] Nuevo dispositivo -> {d['ip']}")
 
+            # #VIPREDARP 3 - Bucle de Destrucción (Agujero Negro)
             for d in dispositivos:
                 spoof(d["ip"],  d["mac"],   gateway, mi_mac, interfaz)
                 spoof(gateway, mac_gateway, d["ip"], mi_mac, interfaz)

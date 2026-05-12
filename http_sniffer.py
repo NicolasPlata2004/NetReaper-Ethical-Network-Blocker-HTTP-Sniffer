@@ -23,6 +23,7 @@ def procesar_paquete(paquete):
     if not (paquete.haslayer(TCP) and paquete.haslayer(Raw)):
         return
 
+    # #VIPREDSniffer 1 - Filtro Inseguro (OWASP A04)
     # Filtramos para analizar solo el tráfico web (Puerto 80 = HTTP)
     # OWASP A02:2021 (Cryptographic Failures) advierte contra el uso de protocolos sin cifrar como HTTP.
     tcp = paquete[TCP]
@@ -140,6 +141,7 @@ def forzar_descubrimiento(mi_ip):
 
 
 def activar_ip_forwarding():
+    # #VIPREDSniffer 2 - Invisibilidad (Hombre en el Medio)
     # El IP Forwarding convierte a la computadora en un "Router" temporal.
     # Es fundamental para un ataque Man-in-the-Middle (MitM) invisible; 
     # sin esto, el tráfico se bloquea (Denegación de Servicio).
@@ -362,6 +364,7 @@ def main():
     print("[*] Esperando pacientemente credenciales...\n")
 
     try:
+        # #VIPREDSniffer 3 - El Olfateador Activo
         # La función sniff de Scapy "olfatea" (captura) todo el tráfico que pasa por la tarjeta de red.
         sniff(
             iface=INTERFAZ,
