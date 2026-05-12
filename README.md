@@ -132,6 +132,14 @@ Test sites (HTTP only, made for security practice):
 - http://testphp.vulnweb.com/login.php
 - http://zero.webappsecurity.com/login.html
 
+### ⚠️ Troubleshooting (Common Issues)
+- **Victim loses internet during Sniffing:** Windows IP Forwarding might be disabled. 
+  1. Open `services.msc`.
+  2. Start **"Routing and Remote Access"** service.
+  3. **Restart your PC** to apply registry changes made by the script.
+- **Target IP not found:** University networks often use **Client Isolation**. If `ping [TargetIP]` fails in CMD, the network prevents direct communication between students.
+- **Permission Denied:** Ensure you are running CMD as **Administrator**.
+
 ---
 
 ## 🛡️ Defenses (Blue Team)
@@ -276,6 +284,16 @@ Luego abre cualquier página de login HTTP (no HTTPS) desde cualquier dispositiv
 Sitios de prueba (HTTP puro, hechos para práctica de seguridad):
 - http://testphp.vulnweb.com/login.php
 - http://zero.webappsecurity.com/login.html
+
+---
+
+### ⚠️ Solución de Problemas Comunes
+- **La víctima pierde internet al usar el Sniffer:** El reenvío de IP (Forwarding) de Windows puede estar fallando.
+  1. Abre `services.msc`.
+  2. Inicia el servicio **"Enrutamiento y acceso remoto"**.
+  3. **Reinicia tu PC** para aplicar los cambios de registro que hace el script automáticamente.
+- **No se encuentra la IP objetivo:** En redes universitarias suele haber **Aislamiento de Clientes**. Si el comando `ping [IP_OBJETIVO]` falla en tu CMD, la red impide que los estudiantes se hablen entre sí.
+- **Error de permisos:** Asegúrate de ejecutar el CMD siempre como **Administrador**.
 
 ---
 
