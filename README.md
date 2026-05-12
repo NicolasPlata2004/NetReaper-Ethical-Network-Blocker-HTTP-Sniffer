@@ -23,7 +23,7 @@ NetReaper exploits a fundamental weakness in the **ARP (Address Resolution Proto
 
 The attack works in two steps:
 
-1. **ARP Sweep** — Sends broadcast ARP requests to discover all active devices on the `/24` subnet.
+1. **ARP Sweep** — Automatically detects the subnet mask (e.g., /22, /23, /24) and performs a multi-threaded ping sweep to discover all active devices in the network range.
 2. **ARP Poisoning** — Continuously sends fake ARP replies to each victim telling them:
    - *"I am the gateway"* → so their traffic goes nowhere
    - *"I am the victim"* → so the gateway stops routing for them
@@ -45,8 +45,8 @@ Listens passively on port 80 for HTTP POST requests containing login fields such
 
 ## ✨ Features
 
-- ✅ **Fully automatic** — no manual configuration needed
-- ✅ **Network Wake-up** — Both tools now perform a silent multi-threaded ping sweep to populate ARP tables, ensuring 100% reliability on Windows.
+- ✅ **Dynamic CIDR Detection** — Automatically detects the subnet mask (e.g., /22, /16) to support large enterprise or university networks.
+- ✅ **Network Wake-up** — Performs a silent multi-threaded ping sweep to populate ARP tables, ensuring 100% reliability on Windows.
 - ✅ Detects active network interface, IP, gateway, and subnet automatically
 - ✅ Scans and blocks **all devices** on the network simultaneously
 - ✅ Re-scans every 30 cycles to catch **newly connected devices**
@@ -206,7 +206,7 @@ NetReaper explota una debilidad fundamental del **Protocolo ARP (Address Resolut
 
 El ataque funciona en dos pasos:
 
-1. **ARP Sweep** — Envía solicitudes ARP broadcast para descubrir todos los dispositivos activos en la subred `/24`.
+1. **ARP Sweep** — Detecta automáticamente la máscara de subred (ej: /22, /23, /24) y realiza un barrido de pings multihilo para descubrir todos los dispositivos activos en el rango de red.
 2. **ARP Poisoning** — Envía continuamente respuestas ARP falsas a cada víctima diciéndoles:
    - *"Yo soy el gateway"* → el tráfico de la víctima no llega a ningún lado
    - *"Yo soy la víctima"* → el gateway deja de enrutar para ella
@@ -228,8 +228,8 @@ Escucha pasivamente en el puerto 80 peticiones HTTP POST que contengan campos de
 
 ## ✨ Características
 
-- ✅ **Totalmente automático** — sin configuración manual
-- ✅ **Despertar de Red** — Ambas herramientas realizan ahora un barrido de pings silencioso y multihilo para despertar a la red y asegurar la detección en Windows.
+- ✅ **Detección Dinámica de CIDR** — Detecta automáticamente la máscara de subred (ej: /22, /16) para dar soporte a redes corporativas o universitarias de gran tamaño.
+- ✅ **Despertar de Red** — Realiza un barrido de pings silencioso y multihilo para despertar a la red y asegurar la detección en Windows.
 - ✅ Detecta interfaz, IP, gateway y subred automáticamente
 - ✅ Escanea y bloquea **todos los dispositivos** de la red simultáneamente
 - ✅ Re-escanea cada 30 ciclos para detectar **nuevos dispositivos conectados**
