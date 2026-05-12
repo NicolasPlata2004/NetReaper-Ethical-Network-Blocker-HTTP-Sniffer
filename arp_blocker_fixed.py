@@ -29,23 +29,21 @@ def detectar_interfaz(mi_ip):
 
 def detectar_gateway():
     try:
-        resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
-        for linea in resultado.splitlines():
-            if ("Puerta de enlace" in linea or "Default Gateway" in linea) and ":" in linea:
-                gw = linea.split(":")[-1].strip()
-                if gw and "." in gw:
-                    return gw
+        # Usamos la tabla de ruteo nativa de Scapy (supera problemas de idiomas en Windows)
+        return conf.route.route("0.0.0.0")[2]
     except Exception:
-        pass
-    return None
+        return None
 
 def detectar_red(mi_ip, interfaz):
+    import struct
     mascara = "255.255.255.0"
-    for iface_name in conf.ifaces:
-        iface = conf.ifaces[iface_name]
-        if getattr(iface, 'ip', None) == mi_ip:
-            mascara = getattr(iface, 'netmask', "255.255.255.0")
-            break
+    try:
+        for r in conf.route.routes:
+            if r[4] == mi_ip and r[2] == '0.0.0.0':
+                mascara = socket.inet_ntoa(struct.pack('!I', r[1]))
+                break
+    except Exception:
+        pass
     
     try:
         red = ipaddress.IPv4Interface(f"{mi_ip}/{mascara}").network

@@ -182,28 +182,22 @@ def activar_ip_forwarding():
 
 
 def detectar_red_completa(mi_ip, interfaz):
+    import struct
     gateway = None
     try:
-        resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
-        for linea in resultado.splitlines():
-            if ("Puerta de enlace" in linea or "Default Gateway" in linea) and ":" in linea:
-                gw = linea.split(":")[-1].strip()
-                if gw and "." in gw:
-                    gateway = gw
-                    break
+        gateway = conf.route.route("0.0.0.0")[2]
     except Exception:
-        pass
-
-    if not gateway:
         partes = mi_ip.split(".")
         gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
 
     mascara = "255.255.255.0"
-    for iface_name in conf.ifaces:
-        iface = conf.ifaces[iface_name]
-        if getattr(iface, 'ip', None) == mi_ip:
-            mascara = getattr(iface, 'netmask', "255.255.255.0")
-            break
+    try:
+        for r in conf.route.routes:
+            if r[4] == mi_ip and r[2] == '0.0.0.0':
+                mascara = socket.inet_ntoa(struct.pack('!I', r[1]))
+                break
+    except Exception:
+        pass
 
     try:
         rango = str(ipaddress.IPv4Interface(f"{mi_ip}/{mascara}").network)
