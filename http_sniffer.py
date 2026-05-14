@@ -249,21 +249,26 @@ def leer_arp_windows(mi_ip, gateway):
 
 
 def obtener_mac(ip, interfaz):
+    # Intentar primero con la tabla ARP de Windows (más confiable en redes locales Wi-Fi/Hotspot)
+    try:
+        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
+        for linea in resultado.splitlines():
+            # Buscar la IP exacta (evitar confundir 192.168.1.1 con 192.168.1.10)
+            if f" {ip} " in linea or linea.strip().startswith(ip):
+                partes = linea.split()
+                if len(partes) >= 2 and partes[0] == ip:
+                    return partes[1].replace("-", ":")
+    except Exception:
+        pass
+
+    # Si no está en la tabla de Windows, usar Scapy (ARP Request activo)
     for _ in range(3):
         paquete = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip)
         resp, _ = srp(paquete, iface=interfaz, timeout=5, verbose=False)
         if resp:
             return resp[0][1].hwsrc
         time.sleep(0.5)
-    try:
-        resultado = subprocess.check_output("arp -a", encoding="cp850", errors="ignore")
-        for linea in resultado.splitlines():
-            if ip in linea and "dinámico" in linea.lower():
-                partes = linea.split()
-                if len(partes) >= 2 and partes[0] == ip:
-                    return partes[1].replace("-", ":")
-    except Exception:
-        pass
+        
     return None
 
 
