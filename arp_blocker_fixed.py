@@ -27,9 +27,13 @@ def detectar_interfaz(mi_ip):
             return k
     return None
 
-def detectar_gateway():
+def detectar_gateway(mi_ip):
     try:
-        # Usamos la tabla de ruteo nativa de Scapy (supera problemas de idiomas en Windows)
+        # Buscar el gateway específico para la interfaz actual (mi_ip)
+        for r in conf.route.routes:
+            if r[4] == mi_ip and r[0] == 0:
+                return r[2]
+        # Respaldo
         return conf.route.route("0.0.0.0")[2]
     except Exception:
         return None
@@ -204,7 +208,7 @@ def main():
     interfaz = detectar_interfaz(mi_ip)
     print(f"[+] Interfaz Activa: {interfaz}")
 
-    gateway = detectar_gateway()
+    gateway = detectar_gateway(mi_ip)
     print(f"[+] Gateway (Router): {gateway}")
     
     rango = detectar_red(mi_ip, interfaz)

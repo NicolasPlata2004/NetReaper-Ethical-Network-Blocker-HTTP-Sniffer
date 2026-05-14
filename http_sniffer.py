@@ -191,7 +191,13 @@ def detectar_red_completa(mi_ip, interfaz):
     import struct
     gateway = None
     try:
-        gateway = conf.route.route("0.0.0.0")[2]
+        # Buscar el gateway específico para la interfaz actual (mi_ip)
+        for r in conf.route.routes:
+            if r[4] == mi_ip and r[0] == 0:
+                gateway = r[2]
+                break
+        if not gateway:
+            gateway = conf.route.route("0.0.0.0")[2]
     except Exception:
         partes = mi_ip.split(".")
         gateway = f"{partes[0]}.{partes[1]}.{partes[2]}.1"
